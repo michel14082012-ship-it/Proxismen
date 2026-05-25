@@ -1,59 +1,60 @@
 const express = require('express');
-const http = require('http');
 const https = require('https');
+const http = require('http');
 const url = require('url');
 const app = express();
 
-// --- INTERFAZ CAMUFLADA ---
+// --- CONFIGURACIÓN SECRETA ---
+const MI_CODIGO_SECRETO = "777"; // Cambia esto por lo que quieras
+
 app.get('/', (req, res) => {
-  res.send(`<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <title>Recibidos (2) - gmail.com</title>
-  <link rel="icon" href="https://gstatic.com" type="image/x-icon">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body, html { height: 100%; overflow: hidden; font-family: sans-serif; background: #f6f8fc; }
-    .header { height: 50px; background: #f6f8fc; display: flex; align-items: center; padding: 0 15px; gap: 15px; border-bottom: 1px solid #e5e7eb; }
-    form { flex: 1; display: flex; background: #eaf1fb; border-radius: 24px; padding: 6px 15px; }
-    .address-bar { flex: 1; border: none; background: transparent; outline: none; font-size: 14px; color: #3c4043; }
-    .nav-btn { background: none; border: none; color: #5f6368; font-size: 18px; cursor: pointer; }
-    .view { height: calc(100% - 50px); width: 100%; background: #000; }
-    iframe { width: 100%; height: 100%; border: none; }
-  </style>
-</head>
-<body>
-  <header class="header">
-    <button class="nav-btn" onclick="history.back()">←</button>
-    <form id="p-form">
-      <input type="text" id="u-input" class="address-bar" placeholder="Introduce URL para jugar..." required>
-    </form>
-    <div style="width:30px; height:30px; background:#0b57d0; color:white; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px;">U</div>
-  </header>
-  <div class="view"><iframe id="f" allow="fullscreen; autoplay; geolocation; microphone; camera"></iframe></div>
-  <script>
-    const form = document.getElementById('p-form');
-    const input = document.getElementById('u-input');
-    const frame = document.getElementById('f');
-    form.onsubmit = (e) => {
-      e.preventDefault();
-      let q = input.value.trim();
-      let target = q.startsWith('http') ? q : 'https://' + q;
-      window.location.search = '?url=' + encodeURIComponent(target);
-    };
-    const params = new URLSearchParams(window.location.search);
-    const urlParam = params.get('url');
-    if (urlParam) {
-      input.value = urlParam;
-      frame.src = '/proxy?url=' + encodeURIComponent(urlParam);
-    }
-  </script>
-</body>
-</html>`);
+  const clave = req.query.key;
+
+  // SI NO HAY CLAVE O ES INCORRECTA: Camuflaje total (Wikipedia)
+  if (clave !== MI_CODIGO_SECRETO && !req.query.url) {
+    return res.send(`
+      <html>
+        <head><title>Álgebra lineal - Wikipedia, la enciclopedia libre</title></head>
+        <body style="font-family: sans-serif; padding: 50px; color: #333;">
+          <h1>Álgebra lineal</h1>
+          <p>El álgebra lineal es una rama de las matemáticas que estudia conceptos tales como vectores, matrices...</p>
+          <hr>
+          <p style="color: #888;">Contenido distribuido bajo licencia CC BY-SA 4.0.</p>
+        </body>
+      </html>
+    `);
+  }
+
+  // SI LA CLAVE ES CORRECTA: Interfaz de Proxy secreta con Gmail Tab
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Recibidos (2) - gmail.com</title>
+      <link rel="icon" href="https://gstatic.com">
+      <style>
+        body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #f6f8fc; }
+        .bar { height: 50px; display: flex; align-items: center; padding: 0 15px; background: #f6f8fc; border-bottom: 1px solid #ddd; }
+        input { flex: 1; padding: 8px 15px; border-radius: 20px; border: 1px solid #dfe1e5; background: #eaf1fb; outline: none; }
+        .view { height: calc(100% - 50px); background: #000; }
+        iframe { width: 100%; height: 100%; border: none; }
+      </style>
+    </head>
+    <body>
+      <div class="bar">
+        <form style="flex:1; display:flex;" onsubmit="event.preventDefault(); location.href='?key=${MI_CODIGO_SECRETO}&url=' + encodeURIComponent(document.getElementById('u').value)">
+          <input id="u" type="text" placeholder="URL para WebGL..." required>
+        </form>
+      </div>
+      <div class="view">
+        <iframe src="${req.query.url ? '/proxy?url=' + encodeURIComponent(req.query.url) : 'about:blank'}" allow="fullscreen; autoplay; geolocation"></iframe>
+      </div>
+    </body>
+    </html>
+  `);
 });
 
-// --- PROXY OPTIMIZADO PARA JUEGOS ---
+// --- LÓGICA DE TÚNEL WEBGL ---
 app.get('/proxy', (req, res) => {
   let targetUrl = req.query.url;
   if (!targetUrl) return res.end();
@@ -65,63 +66,37 @@ app.get('/proxy', (req, res) => {
     path: parsed.path || '/',
     method: 'GET',
     rejectUnauthorized: false,
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      'Accept': '*/*',
-      'Referer': parsed.protocol + '//' + parsed.hostname + '/'
-    }
+    headers: { 'User-Agent': 'Mozilla/5.0 Chrome/124.0.0.0', 'Referer': parsed.protocol + '//' + parsed.hostname + '/' }
   };
 
-  const lib = (parsed.protocol === 'https:') ? https : http;
-
+  const lib = parsed.protocol === 'https:' ? https : http;
   const proxyReq = lib.request(options, (proxyRes) => {
-    // Redirecciones
-    if ([301, 302, 307, 308].includes(proxyRes.statusCode)) {
-      let newUrl = url.resolve(targetUrl, proxyRes.headers.location);
-      return res.redirect('/proxy?url=' + encodeURIComponent(newUrl));
+    // Manejo de redirecciones
+    if ([301, 302].includes(proxyRes.statusCode)) {
+      return res.redirect('/proxy?url=' + encodeURIComponent(url.resolve(targetUrl, proxyRes.headers.location)));
     }
 
-    const contentType = proxyRes.headers['content-type'] || '';
+    const headers = { ...proxyRes.headers };
+    delete headers['x-frame-options'];
+    delete headers['content-security-policy'];
     
-    // Si NO es HTML (es un modelo 3D, imagen, textura o script), enviarlo DIRECTO sin tocarlo
-    if (!contentType.includes('text/html')) {
-      res.writeHead(proxyRes.statusCode, {
-        'Content-Type': contentType,
-        'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'public, max-age=86400'
-      });
+    // WebGL necesita que las texturas y datos carguen sin procesar
+    if (!headers['content-type']?.includes('text/html')) {
+      res.writeHead(proxyRes.statusCode, headers);
       return proxyRes.pipe(res);
     }
 
-    // Solo procesamos el HTML para inyectar la BASE URL
     let chunks = [];
-    proxyRes.on('data', chunk => chunks.push(chunk));
+    proxyRes.on('data', d => chunks.push(d));
     proxyRes.on('end', () => {
       let body = Buffer.concat(chunks).toString();
-      const baseUrl = `${parsed.protocol}//${parsed.hostname}${parsed.pathname}`;
-      
-      // Inyectamos la base y dejamos que el navegador cargue el resto de archivos
-      body = body.replace('<head>', `<head><base href="${baseUrl}">`);
-      
-      // Reescribimos solo enlaces principales para no romper los scripts internos de Geo-FS
-      body = body.replace(/href="([^"]+)"/gi, (match, link) => {
-        if (link.startsWith('http') || link.startsWith('/')) {
-            return `href="/proxy?url=${encodeURIComponent(url.resolve(targetUrl, link))}"`;
-        }
-        return match;
-      });
-
-      res.writeHead(proxyRes.statusCode, { 
-        'Content-Type': 'text/html',
-        'X-Frame-Options': 'ALLOWALL'
-      });
+      body = body.replace('<head>', `<head><base href="${parsed.protocol}//${parsed.hostname}${parsed.pathname}">`);
+      res.writeHead(proxyRes.statusCode, { 'Content-Type': 'text/html' });
       res.end(body);
     });
   });
-
-  proxyReq.on('error', () => res.status(500).send('Error de carga.'));
+  proxyReq.on('error', () => res.end());
   proxyReq.end();
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('Proxy listo para Geo-FS'));
+app.listen(process.env.PORT || 3000);
