@@ -4,97 +4,50 @@ const https = require('https');
 const url = require('url');
 const app = express();
 
-// --- INTERFAZ CON CAMUFLAJE DE PESTAÑA ---
+// --- INTERFAZ CON CAMUFLAJE DE GMAIL ---
 app.get('/', (req, res) => {
   res.send(`<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  
-  <!-- CAMUFLAJE EXTERNO: Título e Icono que se ve en la pestaña -->
-  <title>Recibidos (2) - gmail</title>
+  <title>Recibidos (2) - gmail.com</title>
   <link rel="icon" href="https://gstatic.com" type="image/x-icon">
-  
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body, html { height: 100%; overflow: hidden; font-family: sans-serif; background: #0f172a; }
+    body, html { height: 100%; overflow: hidden; font-family: 'Segoe UI', sans-serif; background: #f6f8fc; }
     
-    /* Barra de búsqueda simple y profesional */
-    .browser-bar {
-      height: 50px;
-      background: #1e293b;
-      display: flex;
-      align-items: center;
-      padding: 0 15px;
-      gap: 10px;
-      border-bottom: 1px solid #334155;
-    }
-
-    form { flex: 1; display: flex; gap: 8px; }
+    .header { height: 60px; background: #f6f8fc; display: flex; align-items: center; padding: 0 15px; gap: 15px; border-bottom: 1px solid #e5e7eb; }
+    form { flex: 1; display: flex; background: #eaf1fb; border-radius: 24px; padding: 8px 15px; }
+    .address-bar { flex: 1; border: none; background: transparent; outline: none; font-size: 15px; color: #3c4043; }
     
-    .address-bar {
-      flex: 1;
-      padding: 8px 15px;
-      border-radius: 6px;
-      border: 1px solid #475569;
-      background: #0f172a;
-      color: #fff;
-      outline: none;
-      font-size: 14px;
-    }
+    .nav-btn { background: none; border: none; color: #5f6368; font-size: 20px; cursor: pointer; padding: 5px; }
+    .nav-btn:hover { background: rgba(0,0,0,0.05); border-radius: 50%; }
 
-    .btn {
-      background: #38bdf8;
-      border: none;
-      color: #0f172a;
-      padding: 8px 15px;
-      border-radius: 6px;
-      font-weight: bold;
-      cursor: pointer;
-    }
-
-    .nav-btn {
-      background: none;
-      border: none;
-      color: #94a3b8;
-      font-size: 20px;
-      cursor: pointer;
-    }
-
-    /* Iframe a pantalla completa debajo de la barra */
-    .view-container {
-      height: calc(100% - 50px);
-      width: 100%;
-      background: #fff;
-    }
+    .view { height: calc(100% - 60px); width: 100%; background: #fff; }
     iframe { width: 100%; height: 100%; border: none; }
   </style>
 </head>
 <body>
-  <header class="browser-bar">
-    <button class="nav-btn" onclick="history.back()">←</button>
-    <button class="nav-btn" onclick="history.forward()">→</button>
-    <form id="proxy-form">
-      <input type="text" id="url-input" class="address-bar" placeholder="Introduce URL..." required>
-      <button type="submit" class="btn">IR</button>
+  <header class="header">
+    <div style="display:flex; gap:10px;">
+      <button class="nav-btn" onclick="history.back()">←</button>
+      <button class="nav-btn" onclick="history.forward()">→</button>
+    </div>
+    <form id="p-form">
+      <input type="text" id="u-input" class="address-bar" placeholder="Buscar o introducir URL..." required>
     </form>
-    <button class="nav-btn" onclick="location.href='/'">🏠</button>
+    <div style="width:32px; height:32px; background:#0b57d0; color:white; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:14px;">U</div>
   </header>
-
-  <div class="view-container">
-    <iframe id="frame" src="about:blank"></iframe>
-  </div>
-
+  <div class="view"><iframe id="f"></iframe></div>
   <script>
-    const form = document.getElementById('proxy-form');
-    const input = document.getElementById('url-input');
-    const frame = document.getElementById('frame');
+    const form = document.getElementById('p-form');
+    const input = document.getElementById('u-input');
+    const frame = document.getElementById('f');
 
     form.onsubmit = (e) => {
       e.preventDefault();
-      let query = input.value.trim();
-      let target = query.startsWith('http') ? query : 'https://' + query;
+      let q = input.value.trim();
+      let target = q.startsWith('http') ? q : 'https://' + q;
       window.location.search = '?url=' + encodeURIComponent(target);
     };
 
@@ -109,7 +62,7 @@ app.get('/', (req, res) => {
 </html>`);
 });
 
-// --- LÓGICA DEL PROXY REFORZADA ---
+// --- LÓGICA DE PROXY REFORZADA (ESTILO PROXYIUM) ---
 app.get('/proxy', (req, res) => {
   let targetUrl = req.query.url;
   if (!targetUrl) return res.end();
@@ -122,50 +75,58 @@ app.get('/proxy', (req, res) => {
     method: 'GET',
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      'Accept': '*/*',
       'Accept-Language': 'es-ES,es;q=0.9',
       'Referer': parsed.protocol + '//' + parsed.hostname + '/'
     }
   };
 
-  const lib = parsed.protocol === 'https:' ? https : http;
+  const lib = (parsed.protocol === 'https:') ? https : http;
 
   const proxyReq = lib.request(options, (proxyRes) => {
-    // Manejo de redirecciones automáticas
-    if ([301, 302, 303, 307, 308].includes(proxyRes.statusCode) && proxyRes.headers.location) {
-      let newUrl = proxyRes.headers.location;
-      if (!newUrl.startsWith('http')) newUrl = url.resolve(targetUrl, newUrl);
-      return res.redirect('/proxy?url=' + encodeURIComponent(newUrl));
+    // Seguir redirecciones (Evita que el CSS se pierda en saltos de dominio)
+    if ([301, 302, 307, 308].includes(proxyRes.statusCode) && proxyRes.headers.location) {
+        let newUrl = url.resolve(targetUrl, proxyRes.headers.location);
+        return res.redirect('/proxy?url=' + encodeURIComponent(newUrl));
     }
 
+    const contentType = proxyRes.headers['content-type'] || '';
     const headers = { ...proxyRes.headers };
     delete headers['x-frame-options'];
     delete headers['content-security-policy'];
     delete headers['content-length'];
+
+    // Si es una imagen o binario, lo pasamos directo (pipe) para que cargue rápido
+    if (!contentType.includes('text/html')) {
+        res.writeHead(proxyRes.statusCode, headers);
+        return proxyRes.pipe(res);
+    }
 
     let chunks = [];
     proxyRes.on('data', chunk => chunks.push(chunk));
     proxyRes.on('end', () => {
       let body = Buffer.concat(chunks).toString();
       
-      // Inyectar base para recursos relativos y reescribir enlaces
-      body = body.replace('<head>', `<head><base href="${parsed.protocol}//${parsed.hostname}${parsed.pathname}">`);
-      body = body.replace(/(href|src|action)="(https?:\/\/[^"]+)"/gi, (match, attr, link) => {
-        return `${attr}="/proxy?url=${encodeURIComponent(link)}"`;
+      // REESCRITURA DE RUTAS: Convierte lo relativo en absoluto para que el CSS no se pierda
+      const baseUrl = `${parsed.protocol}//${parsed.hostname}${parsed.pathname.endsWith('/') ? parsed.pathname : parsed.pathname.substring(0, parsed.pathname.lastIndexOf('/') + 1)}`;
+      
+      body = body.replace('<head>', `<head><base href="${baseUrl}">`);
+
+      // Inyectar el proxy en todos los enlaces y recursos
+      body = body.replace(/(href|src|action)="(?!data:)(?!javascript:)([^"]+)"/gi, (match, attr, link) => {
+          try {
+              let absolute = url.resolve(targetUrl, link);
+              return `${attr}="/proxy?url=${encodeURIComponent(absolute)}"`;
+          } catch(e) { return match; }
       });
 
-      res.writeHead(proxyRes.statusCode, {
-        ...headers,
-        'Content-Type': proxyRes.headers['content-type'] || 'text/html',
-        'Access-Control-Allow-Origin': '*'
-      });
+      res.writeHead(proxyRes.statusCode, { ...headers, 'Content-Type': 'text/html' });
       res.end(body);
     });
   });
 
-  proxyReq.on('error', () => res.status(500).send('Error de conexión.'));
+  proxyReq.on('error', () => res.status(500).send('Error de carga.'));
   proxyReq.end();
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('Proxy Camuflado Externo en puerto ' + PORT));
+app.listen(PORT, () => console.log('Proxy Camuflado y Optimizado activo'));
