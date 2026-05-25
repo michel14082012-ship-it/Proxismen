@@ -97,7 +97,7 @@ app.get('/', (req, res) => {
 </html>`);
 });
 
-app.get('/proxy', async (req, res) => {
+app.get('/proxy', (req, res) => {
   const targetUrl = req.query.url;
   if (!targetUrl) return res.redirect('/');
   
@@ -115,15 +115,19 @@ app.get('/proxy', async (req, res) => {
   };
 
   const lib = parsed.protocol === 'https:' ? https : http;
-  const req = lib.request(options, (proxyRes) => {
-    let data = '';
-    proxyRes.on('data', chunk => data += chunk);
+
+  // Se cambia 'req' por 'proxyReq' para evitar conflicto con la 'req' de Express
+  const proxyReq = lib.request(options, (proxyRes) => {
+    let chunks = [];
+    proxyRes.on('data', chunk => chunks.push(chunk));
     proxyRes.on('end', () => {
-      let body = data;
+      let body = Buffer.concat(chunks).toString();
+      
+      // Reescritura básica de URLs
       body = body.replace(/href="https?:\/\//gi, 'href="/proxy?url=https://');
       body = body.replace(/src="https?:\/\//gi, 'src="/proxy?url=https://');
       body = body.replace(/action="https?:\/\//gi, 'action="/proxy?url=https://');
-      body = body.replace('<head>', '<head><base href="' + targetUrl + '">');
+      body = body.replace('<head>', `<head><base href="${targetUrl}">`);
       
       res.writeHead(proxyRes.statusCode, {
         'Content-Type': proxyRes.headers['content-type'] || 'text/html',
@@ -132,8 +136,12 @@ app.get('/proxy', async (req, res) => {
       res.end(body);
     });
   });
-  req.on('error', (e) => res.send('<h2>Error: ' + e.message + '</h2><a href="/">Volver</a>'));
-  req.end();
+
+  proxyReq.on('error', (e) => {
+    res.status(500).send('<h2>Error de conexión: ' + e.message + '</h2><a href="/">Volver</a>');
+  });
+
+  proxyReq.end();
 });
 
 const PORT = process.env.PORT || 3000;
