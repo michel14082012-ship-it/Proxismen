@@ -11,28 +11,50 @@ app.get('/', (req, res) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ultra Proxy</title>
+  <title>Ultra Proxy - Dark Mode</title>
   <style>
+    :root {
+      --bg-bar: #1e293b;
+      --bg-body: #0f172a;
+      --text: #f8fafc;
+      --input-bg: #0f172a;
+      --border: #334155;
+      --accent: #38bdf8;
+      --btn-bg: #334155;
+    }
+
+    /* Estilos para el Modo Claro */
+    body.light-mode {
+      --bg-bar: #f1f5f9;
+      --bg-body: #cbd5e1;
+      --text: #1e293b;
+      --input-bg: #ffffff;
+      --border: #cbd5e1;
+      --accent: #0284c7;
+      --btn-bg: #e2e8f0;
+    }
+
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body, html { height: 100%; overflow: hidden; font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; }
+    body, html { height: 100%; overflow: hidden; font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-body); transition: background 0.3s; }
     
     .browser-bar {
       height: 60px;
-      background: #1e293b;
+      background: var(--bg-bar);
       display: flex;
       align-items: center;
       padding: 0 15px;
       gap: 12px;
-      border-bottom: 1px solid #334155;
+      border-bottom: 1px solid var(--border);
       z-index: 100;
+      transition: background 0.3s;
     }
 
     .nav-buttons { display: flex; gap: 8px; }
     
     .btn {
-      background: #334155;
+      background: var(--btn-bg);
       border: none;
-      color: white;
+      color: var(--text);
       padding: 8px 12px;
       border-radius: 6px;
       cursor: pointer;
@@ -43,9 +65,9 @@ app.get('/', (req, res) => {
       justify-content: center;
       text-decoration: none;
     }
-    .btn:hover { background: #475569; }
-    .btn-primary { background: #38bdf8; color: #0f172a; font-weight: bold; font-size: 14px; }
-    .btn-primary:hover { background: #7dd3fc; }
+    .btn:hover { opacity: 0.8; }
+    .btn-primary { background: var(--accent); color: white; font-weight: bold; font-size: 14px; }
+    .btn-mode { font-size: 16px; background: none; border: 1px solid var(--border); }
 
     form { flex: 1; display: flex; gap: 8px; }
     
@@ -53,18 +75,20 @@ app.get('/', (req, res) => {
       flex: 1;
       padding: 10px 16px;
       border-radius: 20px;
-      border: 1px solid #475569;
-      background: #0f172a;
-      color: #e2e8f0;
+      border: 1px solid var(--border);
+      background: var(--input-bg);
+      color: var(--text);
       outline: none;
       font-size: 14px;
+      transition: all 0.3s;
     }
+    .address-bar:focus { border-color: var(--accent); }
 
     .view-container { height: calc(100% - 60px); width: 100%; background: #fff; }
     iframe { width: 100%; height: 100%; border: none; }
   </style>
 </head>
-<body>
+<body class="dark-mode">
   <header class="browser-bar">
     <div class="nav-buttons">
       <button class="btn" onclick="history.back()">←</button>
@@ -74,9 +98,11 @@ app.get('/', (req, res) => {
     </div>
 
     <form id="proxy-form">
-      <input type="text" id="url-input" class="address-bar" placeholder="Escribe una URL o busca algo..." required>
+      <input type="text" id="url-input" class="address-bar" placeholder="Busca o escribe una URL..." required>
       <button type="submit" class="btn btn-primary">IR</button>
     </form>
+
+    <button class="btn btn-mode" id="theme-toggle" title="Cambiar Modo">🌙</button>
   </header>
 
   <div class="view-container">
@@ -87,14 +113,29 @@ app.get('/', (req, res) => {
     const form = document.getElementById('proxy-form');
     const input = document.getElementById('url-input');
     const frame = document.getElementById('frame');
+    const themeToggle = document.getElementById('theme-toggle');
+    const body = document.body;
 
-    // Manejar la navegación
+    // --- LÓGICA DE TEMA (DARK/LIGHT) ---
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme === 'light') {
+      body.classList.add('light-mode');
+      themeToggle.innerText = '☀️';
+    }
+
+    themeToggle.onclick = () => {
+      body.classList.toggle('light-mode');
+      const isLight = body.classList.contains('light-mode');
+      themeToggle.innerText = isLight ? '☀️' : '🌙';
+      localStorage.setItem('theme', isLight ? 'light' : 'dark');
+    };
+
+    // --- NAVEGACIÓN ---
     form.onsubmit = (e) => {
       e.preventDefault();
       let query = input.value.trim();
       let targetUrl = '';
 
-      // Lógica de búsqueda: Si no tiene punto o no empieza por http, buscar en DuckDuckGo
       if (!query.includes('.') || (!query.startsWith('http') && !query.includes('/'))) {
         targetUrl = 'https://duckduckgo.com' + encodeURIComponent(query);
       } else {
@@ -104,7 +145,6 @@ app.get('/', (req, res) => {
       window.location.search = '?url=' + encodeURIComponent(targetUrl);
     };
 
-    // Cargar URL desde parámetros
     const params = new URLSearchParams(window.location.search);
     const urlParam = params.get('url');
     if (urlParam) {
@@ -129,15 +169,13 @@ app.get('/proxy', (req, res) => {
     method: 'GET',
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-      'Accept-Language': 'es-ES,es;q=0.9'
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
     }
   };
 
   const lib = parsed.protocol === 'https:' ? https : http;
 
   const proxyReq = lib.request(options, (proxyRes) => {
-    // Clonamos cabeceras y eliminamos las de seguridad para evitar bloqueos
     const headers = { ...proxyRes.headers };
     delete headers['x-frame-options'];
     delete headers['content-security-policy'];
@@ -148,12 +186,10 @@ app.get('/proxy', (req, res) => {
     proxyRes.on('end', () => {
       let body = Buffer.concat(chunks).toString();
       
-      // Reescritura de enlaces para que sigan usando el proxy
       body = body.replace(/(href|src|action)="(https?:\/\/[^"]+)"/gi, (match, attr, link) => {
         return `${attr}="/proxy?url=${encodeURIComponent(link)}"`;
       });
 
-      // Inyectar base para recursos relativos
       body = body.replace('<head>', `<head><base href="${targetUrl}">`);
       
       res.writeHead(proxyRes.statusCode, {
@@ -166,11 +202,11 @@ app.get('/proxy', (req, res) => {
   });
 
   proxyReq.on('error', (e) => {
-    res.status(500).send(`<h2>Error de proxy: ${e.message}</h2><a href="/">Volver</a>`);
+    res.status(500).send(`<h2>Error: ${e.message}</h2>`);
   });
 
   proxyReq.end();
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('🚀 Proxy corriendo en puerto ' + PORT));
+app.listen(PORT, () => console.log('🚀 Proxy con Modo Oscuro en puerto ' + PORT));
