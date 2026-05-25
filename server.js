@@ -26,7 +26,7 @@ app.get('/', (req, res) => {
       <body>
         <div class="bar">
           <form style="flex:1; display:flex;" onsubmit="event.preventDefault(); location.href='?search=${CLAVE_SECRETA}&url=' + encodeURIComponent(document.getElementById('u').value)">
-            <input id="u" type="text" placeholder="Pega la URL aquí (ej: bing.com o duckduckgo.com)" required>
+            <input id="u" type="text" placeholder="URL completa (ej: https://duckduckgo.com)" required>
           </form>
         </div>
         <div class="view">
@@ -36,18 +36,8 @@ app.get('/', (req, res) => {
       </html>
     `);
   }
-
-  // INTERFAZ WIKIPEDIA
-  res.send(`
-    <!DOCTYPE html>
-    <html lang="es">
-    <head><meta charset="UTF-8"><title>Wikipedia</title><style>body{font-family:sans-serif;margin:0;color:#202122;background:#fff;}.h{display:flex;justify-content:space-between;align-items:center;padding:10px 30px;border-bottom:1px solid #a2a9b1;background:#f6f6f6;}.s input{padding:8px;border:1px solid #a2a9b1;width:250px;}.c{padding:40px 100px;max-width:900px;}h1{border-bottom:1px solid #a2a9b1;font-family:serif;}</style></head>
-    <body>
-      <div class="h"><div>Wikipedia</div><form class="s" action="/" method="get"><input type="text" name="search" placeholder="Buscar..."></form></div>
-      <div class="c"><h1>Bienvenidos</h1><p>Wikipedia es una enciclopedia libre...</p></div>
-    </body>
-    </html>
-  `);
+  // Interfaz Wikipedia (Camuflaje)
+  res.send('<!DOCTYPE html><html><head><title>Wikipedia</title></head><body style="font-family:sans-serif;padding:50px;"><h1>Bienvenidos a Wikipedia</h1><form action="/" method="get"><input type="text" name="search" placeholder="Buscar..."></form></body></html>');
 });
 
 app.get('/proxy', (req, res) => {
@@ -57,26 +47,23 @@ app.get('/proxy', (req, res) => {
 
   const parsed = url.parse(targetUrl);
   const options = {
-    hostname: parsed.hostname, 
+    hostname: parsed.hostname,
     port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
-    path: parsed.path || '/', 
-    method: 'GET', 
+    path: parsed.path || '/',
+    method: 'GET',
     rejectUnauthorized: false,
-    headers: { 
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'es-ES,es;q=0.9',
-        'Referer': parsed.protocol + '//' + parsed.hostname + '/'
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'Referer': parsed.protocol + '//' + parsed.hostname + '/'
     }
   };
 
   const lib = parsed.protocol === 'https:' ? https : http;
   const proxyReq = lib.request(options, (proxyRes) => {
-    // Redirecciones
+    // Manejo de redirecciones
     if ([301, 302, 307, 308].includes(proxyRes.statusCode)) {
-        let newLocation = proxyRes.headers.location;
-        if (!newLocation.startsWith('http')) newLocation = url.resolve(targetUrl, newLocation);
-        return res.redirect('/proxy?url=' + encodeURIComponent(newLocation));
+      let newLoc = url.resolve(targetUrl, proxyRes.headers.location);
+      return res.redirect('/proxy?url=' + encodeURIComponent(newLoc));
     }
 
     const headers = { ...proxyRes.headers };
@@ -84,10 +71,10 @@ app.get('/proxy', (req, res) => {
     delete headers['content-security-policy'];
     delete headers['content-length'];
 
-    // Para YouTube e imágenes, pasamos los datos tal cual
+    // Si no es HTML (CSS, JS, Imágenes), lo servimos directo
     if (!headers['content-type']?.includes('text/html')) {
-        res.writeHead(proxyRes.statusCode, headers);
-        return proxyRes.pipe(res);
+      res.writeHead(proxyRes.statusCode, headers);
+      return proxyRes.pipe(res);
     }
 
     let chunks = [];
@@ -95,18 +82,19 @@ app.get('/proxy', (req, res) => {
     proxyRes.on('end', () => {
       let body = Buffer.concat(chunks).toString();
       
-      // Inyección de BASE URL (Clave para que carguen las miniaturas y el CSS)
-      body = body.replace('<head>', `<head><base href="${parsed.protocol}//${parsed.hostname}${parsed.pathname}">`);
-      
-      // Intentar engañar a Google para que no bloquee las búsquedas
-      body = body.replace(/href="/gi, 'href="/proxy?url='); 
-      
-      res.writeHead(proxyRes.statusCode, { 'Content-Type': 'text/html', 'Access-Control-Allow-Origin': '*' });
+      // REESCRITURA CRÍTICA: Convierte rutas relativas en absolutas a través del proxy
+      body = body.replace(/(href|src|action)="(?!data:)(?!javascript:)([^"]+)"/gi, (match, attr, link) => {
+        let abs = url.resolve(targetUrl, link);
+        return `${attr}="/proxy?url=${encodeURIComponent(abs)}"`;
+      });
+
+      body = body.replace('<head>', `<head><base href="${targetUrl}">`);
+      res.writeHead(proxyRes.statusCode, { 'Content-Type': 'text/html' });
       res.end(body);
     });
   });
 
-  proxyReq.on('error', (e) => res.status(500).send("Error de conexión. Intenta con otra URL."));
+  proxyReq.on('error', () => res.status(500).send("Error de carga."));
   proxyReq.end();
 });
 
