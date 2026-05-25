@@ -19,14 +19,14 @@ app.get('/', (req, res) => {
           body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #f6f8fc; font-family: sans-serif; }
           .bar { height: 55px; display: flex; align-items: center; padding: 0 20px; background: #f6f8fc; border-bottom: 1px solid #ddd; }
           input { flex: 1; padding: 10px 20px; border-radius: 24px; border: 1px solid #dfe1e5; background: #eaf1fb; outline: none; font-size: 14px; }
-          .view { height: calc(100% - 55px); background: #fff; } /* Fondo blanco para evitar el negro */
+          .view { height: calc(100% - 55px); background: #fff; }
           iframe { width: 100%; height: 100%; border: none; }
         </style>
       </head>
       <body>
         <div class="bar">
           <form style="flex:1; display:flex;" onsubmit="event.preventDefault(); location.href='?search=${CLAVE_SECRETA}&url=' + encodeURIComponent(document.getElementById('u').value)">
-            <input id="u" type="text" placeholder="Pega aquí la URL (ej: https://wikipedia.org)" required>
+            <input id="u" type="text" placeholder="Pega la URL aquí (ej: bing.com o duckduckgo.com)" required>
           </form>
         </div>
         <div class="view">
@@ -64,7 +64,8 @@ app.get('/proxy', (req, res) => {
     rejectUnauthorized: false,
     headers: { 
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': '*/*',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'es-ES,es;q=0.9',
         'Referer': parsed.protocol + '//' + parsed.hostname + '/'
     }
   };
@@ -79,11 +80,11 @@ app.get('/proxy', (req, res) => {
     }
 
     const headers = { ...proxyRes.headers };
-    // ELIMINACIÓN AGRESIVA DE BLOQUEOS
     delete headers['x-frame-options'];
     delete headers['content-security-policy'];
     delete headers['content-length'];
 
+    // Para YouTube e imágenes, pasamos los datos tal cual
     if (!headers['content-type']?.includes('text/html')) {
         res.writeHead(proxyRes.statusCode, headers);
         return proxyRes.pipe(res);
@@ -93,18 +94,19 @@ app.get('/proxy', (req, res) => {
     proxyRes.on('data', d => chunks.push(d));
     proxyRes.on('end', () => {
       let body = Buffer.concat(chunks).toString();
-      // Inyectar BASE para que los archivos (CSS, JS) carguen desde el sitio real
+      
+      // Inyección de BASE URL (Clave para que carguen las miniaturas y el CSS)
       body = body.replace('<head>', `<head><base href="${parsed.protocol}//${parsed.hostname}${parsed.pathname}">`);
       
-      // Intentar engañar a los scripts que detectan iframes
-      body = body.replace('if (top !== self)', 'if (false)'); 
+      // Intentar engañar a Google para que no bloquee las búsquedas
+      body = body.replace(/href="/gi, 'href="/proxy?url='); 
       
       res.writeHead(proxyRes.statusCode, { 'Content-Type': 'text/html', 'Access-Control-Allow-Origin': '*' });
       res.end(body);
     });
   });
 
-  proxyReq.on('error', (e) => res.status(500).send("Error: " + e.message));
+  proxyReq.on('error', (e) => res.status(500).send("Error de conexión. Intenta con otra URL."));
   proxyReq.end();
 });
 
