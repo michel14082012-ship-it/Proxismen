@@ -4,18 +4,18 @@ const https = require('https');
 const url = require('url');
 const app = express();
 
+// --- INTERFAZ DEL NAVEGADOR ---
 app.get('/', (req, res) => {
   res.send(`<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Proxy Pro</title>
+  <title>Ultra Proxy</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body, html { height: 100%; overflow: hidden; font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; }
     
-    /* Barra de Navegación Estilo Browser */
     .browser-bar {
       height: 60px;
       background: #1e293b;
@@ -59,28 +59,22 @@ app.get('/', (req, res) => {
       outline: none;
       font-size: 14px;
     }
-    .address-bar:focus { border-color: #38bdf8; box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2); }
 
-    /* Contenedor del Iframe */
-    .view-container {
-      height: calc(100% - 60px);
-      width: 100%;
-      background: #fff;
-    }
+    .view-container { height: calc(100% - 60px); width: 100%; background: #fff; }
     iframe { width: 100%; height: 100%; border: none; }
   </style>
 </head>
 <body>
   <header class="browser-bar">
     <div class="nav-buttons">
-      <button class="btn" onclick="history.back()" title="Atrás">←</button>
-      <button class="btn" onclick="history.forward()" title="Adelante">→</button>
-      <button class="btn" onclick="document.getElementById('frame').contentWindow.location.reload()" title="Recargar">↻</button>
-      <a href="/" class="btn" title="Inicio">🏠</a>
+      <button class="btn" onclick="history.back()">←</button>
+      <button class="btn" onclick="history.forward()">→</button>
+      <button class="btn" onclick="document.getElementById('frame').contentWindow.location.reload()">↻</button>
+      <a href="/" class="btn">🏠</a>
     </div>
 
-    <form action="/" method="get">
-      <input type="text" name="url" class="address-bar" placeholder="Busca o escribe una URL..." required>
+    <form id="proxy-form">
+      <input type="text" id="url-input" class="address-bar" placeholder="Escribe una URL o busca algo..." required>
       <button type="submit" class="btn btn-primary">IR</button>
     </form>
   </header>
@@ -90,22 +84,39 @@ app.get('/', (req, res) => {
   </div>
 
   <script>
+    const form = document.getElementById('proxy-form');
+    const input = document.getElementById('url-input');
+    const frame = document.getElementById('frame');
+
+    // Manejar la navegación
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      let query = input.value.trim();
+      let targetUrl = '';
+
+      // Lógica de búsqueda: Si no tiene punto o no empieza por http, buscar en DuckDuckGo
+      if (!query.includes('.') || (!query.startsWith('http') && !query.includes('/'))) {
+        targetUrl = 'https://duckduckgo.com' + encodeURIComponent(query);
+      } else {
+        targetUrl = query.startsWith('http') ? query : 'https://' + query;
+      }
+      
+      window.location.search = '?url=' + encodeURIComponent(targetUrl);
+    };
+
+    // Cargar URL desde parámetros
     const params = new URLSearchParams(window.location.search);
     const urlParam = params.get('url');
-    const frame = document.getElementById('frame');
-    const input = document.querySelector('.address-bar');
-
     if (urlParam) {
-      let target = urlParam;
-      if (!target.startsWith('http')) target = 'https://' + target;
-      input.value = target;
-      frame.src = '/proxy?url=' + encodeURIComponent(target);
+      input.value = urlParam;
+      frame.src = '/proxy?url=' + encodeURIComponent(urlParam);
     }
   </script>
 </body>
 </html>`);
 });
 
+// --- LÓGICA DEL PROXY ---
 app.get('/proxy', (req, res) => {
   const targetUrl = req.query.url;
   if (!targetUrl) return res.redirect('/');
@@ -118,48 +129,48 @@ app.get('/proxy', (req, res) => {
     method: 'GET',
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+      'Accept-Language': 'es-ES,es;q=0.9'
     }
   };
 
   const lib = parsed.protocol === 'https:' ? https : http;
 
   const proxyReq = lib.request(options, (proxyRes) => {
+    // Clonamos cabeceras y eliminamos las de seguridad para evitar bloqueos
+    const headers = { ...proxyRes.headers };
+    delete headers['x-frame-options'];
+    delete headers['content-security-policy'];
+    delete headers['content-length'];
+
     let chunks = [];
     proxyRes.on('data', chunk => chunks.push(chunk));
     proxyRes.on('end', () => {
       let body = Buffer.concat(chunks).toString();
       
-      // Reescritura avanzada de URLs para navegación continua
+      // Reescritura de enlaces para que sigan usando el proxy
       body = body.replace(/(href|src|action)="(https?:\/\/[^"]+)"/gi, (match, attr, link) => {
         return `${attr}="/proxy?url=${encodeURIComponent(link)}"`;
       });
 
-      // Inyección de Base URL para que las rutas relativas funcionen
+      // Inyectar base para recursos relativos
       body = body.replace('<head>', `<head><base href="${targetUrl}">`);
       
       res.writeHead(proxyRes.statusCode, {
+        ...headers,
         'Content-Type': proxyRes.headers['content-type'] || 'text/html',
-        'X-Frame-Options': 'ALLOWALL',
-        'Content-Security-Policy': "frame-ancestors *"
+        'Access-Control-Allow-Origin': '*'
       });
       res.end(body);
     });
   });
 
   proxyReq.on('error', (e) => {
-    res.status(500).send(`
-      <div style="background:#0f172a; color:white; height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:sans-serif;">
-        <h1>⚠️ Error de Conexión</h1>
-        <p>${e.message}</p>
-        <br>
-        <a href="/" style="color:#38bdf8; text-decoration:none; border:1px solid #38bdf8; padding:10px 20px; border-radius:5px;">Volver al inicio</a>
-      </div>
-    `);
+    res.status(500).send(`<h2>Error de proxy: ${e.message}</h2><a href="/">Volver</a>`);
   });
 
   proxyReq.end();
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('Servidor Proxy listo en puerto ' + PORT));
+app.listen(PORT, () => console.log('🚀 Proxy corriendo en puerto ' + PORT));
