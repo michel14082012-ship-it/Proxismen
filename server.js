@@ -4,7 +4,7 @@ const http = require('http');
 const url = require('url');
 const app = express();
 
-const CLAVE_SECRETA = "777"; // Cambia esto por tu código
+const CLAVE_SECRETA = "777"; // Tu clave para activar el proxy
 
 app.get('/', (req, res) => {
   const query = req.query.search;
@@ -39,7 +39,7 @@ app.get('/', (req, res) => {
     `);
   }
 
-  // SI ESCRIBES CUALQUIER OTRA COSA (o no hay búsqueda): Mostrar Wikipedia Real (Copia Visual)
+  // INTERFAZ WIKIPEDIA (CAMUFLAJE)
   res.send(`
     <!DOCTYPE html>
     <html lang="es">
@@ -51,12 +51,11 @@ app.get('/', (req, res) => {
         .w-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 30px; border-bottom: 1px solid #a2a9b1; background: #f6f6f6; }
         .w-logo { display: flex; align-items: center; gap: 10px; font-weight: bold; font-size: 18px; }
         .w-search { display: flex; gap: 0; }
-        .w-search input { padding: 8px; border: 1px solid #a2a9b1; width: 300px; }
+        .w-search input { padding: 8px; border: 1px solid #a2a9b1; width: 250px; }
         .w-search button { padding: 8px 15px; background: #3675ee; color: white; border: 1px solid #3675ee; cursor: pointer; }
         .w-content { padding: 40px 100px; max-width: 900px; }
         h1 { border-bottom: 1px solid #a2a9b1; padding-bottom: 5px; font-family: serif; font-size: 32px; }
         .w-nav { color: #0645ad; text-decoration: none; margin-right: 15px; font-size: 14px; }
-        .w-box { border: 1px solid #a2a9b1; background: #f8f9fa; padding: 15px; float: right; width: 250px; margin-left: 20px; font-size: 13px; }
       </style>
     </head>
     <body>
@@ -68,20 +67,10 @@ app.get('/', (req, res) => {
         </form>
       </div>
       <div class="w-content">
-        ${query ? `<h1>Error 404</h1><p>La página "<b>${query}</b>" no existe. <a href="/" class="w-nav">Volver a la página principal.</a></p>` : `
+        ${query ? `<h1>Error 404</h1><p>La página "<b>${query}</b>" no existe. <a href="/" class="w-nav">Volver.</a></p>` : `
         <h1>Bienvenidos a Wikipedia</h1>
-        <div class="w-box">
-          <b>Artículo destacado</b><br><br>
-          <img src="https://wikimedia.org" style="width:100%"><br>
-          El álgebra lineal es una rama de las matemáticas que estudia conceptos tales como vectores y matrices.
-        </div>
-        <p><b>Wikipedia</b> es una enciclopedia libre, políglota y editada de manera colaborativa. Es administrada por la Fundación Wikimedia, una organización sin ánimo de lucro.</p>
-        <p><a href="#" class="w-nav">Portada</a> <a href="#" class="w-nav">Actualidad</a> <a href="#" class="w-nav">Páginas nuevas</a></p>
-        <h3>Efemérides</h3>
-        <ul>
-          <li>Se celebra el Día Mundial de las Telecomunicaciones.</li>
-          <li>En 1749 nace Edward Jenner, médico inglés.</li>
-        </ul>
+        <p><b>Wikipedia</b> es una enciclopedia libre, políglota y editada de manera colaborativa.</p>
+        <p>Puedes usar el buscador de arriba para encontrar información sobre cualquier tema.</p>
         `}
       </div>
     </body>
@@ -89,22 +78,32 @@ app.get('/', (req, res) => {
   `);
 });
 
-// --- LÓGICA DEL PROXY (WEBGL OK) ---
+// --- LÓGICA DEL PROXY CORREGIDA ---
 app.get('/proxy', (req, res) => {
   let targetUrl = req.query.url;
   if (!targetUrl) return res.end();
   const parsed = url.parse(targetUrl);
   const options = {
-    hostname: parsed.hostname, port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
-    path: parsed.path || '/', method: 'GET', rejectUnauthorized: false,
+    hostname: parsed.hostname, 
+    port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+    path: parsed.path || '/', 
+    method: 'GET', 
+    rejectUnauthorized: false,
     headers: { 'User-Agent': 'Mozilla/5.0 Chrome/124.0.0.0', 'Referer': parsed.protocol + '//' + parsed.hostname + '/' }
   };
   const lib = parsed.protocol === 'https:' ? https : http;
   const proxyReq = lib.request(options, (proxyRes) => {
-    if (.includes(proxyRes.statusCode)) return res.redirect('/proxy?url=' + encodeURIComponent(url.resolve(targetUrl, proxyRes.headers.location)));
+    // CORRECCIÓN: Lista de códigos añadida
+    if ([301, 302, 307, 308].includes(proxyRes.statusCode)) {
+        return res.redirect('/proxy?url=' + encodeURIComponent(url.resolve(targetUrl, proxyRes.headers.location)));
+    }
     const headers = { ...proxyRes.headers };
-    delete headers['x-frame-options']; delete headers['content-security-policy'];
-    if (!headers['content-type']?.includes('text/html')) { res.writeHead(proxyRes.statusCode, headers); return proxyRes.pipe(res); }
+    delete headers['x-frame-options']; 
+    delete headers['content-security-policy'];
+    if (!headers['content-type']?.includes('text/html')) { 
+        res.writeHead(proxyRes.statusCode, headers); 
+        return proxyRes.pipe(res); 
+    }
     let chunks = [];
     proxyRes.on('data', d => chunks.push(d));
     proxyRes.on('end', () => {
@@ -118,4 +117,5 @@ app.get('/proxy', (req, res) => {
   proxyReq.end();
 });
 
-app.listen(process.env.PORT || 3000);
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log('Servidor activo'));
