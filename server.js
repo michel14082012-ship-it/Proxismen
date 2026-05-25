@@ -4,6 +4,7 @@ const https = require('https');
 const url = require('url');
 const app = express();
 
+// --- INTERFAZ CAMUFLADA ---
 app.get('/', (req, res) => {
   res.send(`<!DOCTYPE html>
 <html lang="es">
@@ -27,7 +28,7 @@ app.get('/', (req, res) => {
     <button class="nav-btn" onclick="history.back()">←</button>
     <button class="nav-btn" onclick="history.forward()">→</button>
     <form id="p-form">
-      <input type="text" id="u-input" class="address-bar" placeholder="Introduce URL..." required>
+      <input type="text" id="u-input" class="address-bar" placeholder="Introduce URL (ej: www.geo-fs.com)..." required>
     </form>
     <div style="width:32px; height:32px; background:#0b57d0; color:white; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:14px;">U</div>
   </header>
@@ -53,6 +54,7 @@ app.get('/', (req, res) => {
 </html>`);
 });
 
+// --- LÓGICA DE PROXY SIN RESTRICCIONES SSL ---
 app.get('/proxy', (req, res) => {
   let targetUrl = req.query.url;
   if (!targetUrl) return res.end();
@@ -63,20 +65,20 @@ app.get('/proxy', (req, res) => {
     port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
     path: parsed.path || '/',
     method: 'GET',
+    rejectUnauthorized: false, // SOLUCIÓN: Ignora errores de certificado SSL/Hostname
     headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'Accept': '*/*',
       'Accept-Language': 'es-ES,es;q=0.9',
-      'Connection': 'keep-alive',
-      'Upgrade-Insecure-Requests': '1'
+      'Referer': parsed.protocol + '//' + parsed.hostname + '/'
     }
   };
 
   const lib = (parsed.protocol === 'https:') ? https : http;
 
   const proxyReq = lib.request(options, (proxyRes) => {
-    // Corrección de redirecciones
-    if ([301, 302, 303, 307, 308].includes(proxyRes.statusCode) && proxyRes.headers.location) {
+    // Manejo de redirecciones (301, 302, 307, 308)
+    if ([301, 302, 307, 308].includes(proxyRes.statusCode) && proxyRes.headers.location) {
       let newUrl = url.resolve(targetUrl, proxyRes.headers.location);
       return res.redirect('/proxy?url=' + encodeURIComponent(newUrl));
     }
@@ -87,6 +89,7 @@ app.get('/proxy', (req, res) => {
     delete headers['content-security-policy'];
     delete headers['content-length'];
 
+    // Para imágenes, scripts y CSS, usamos pipe (más rápido y estable)
     if (!contentType.includes('text/html')) {
       res.writeHead(proxyRes.statusCode, headers);
       return proxyRes.pipe(res);
@@ -97,23 +100,35 @@ app.get('/proxy', (req, res) => {
     proxyRes.on('end', () => {
       let body = Buffer.concat(chunks).toString();
       const baseUrl = `${parsed.protocol}//${parsed.hostname}${parsed.pathname}`;
+      
+      // Inyectar base y reescribir enlaces
       body = body.replace('<head>', `<head><base href="${baseUrl}">`);
       body = body.replace(/(href|src|action)="(?!data:)(?!javascript:)([^"]+)"/gi, (match, attr, link) => {
         try {
-          return `${attr}="/proxy?url=${encodeURIComponent(url.resolve(targetUrl, link))}"`;
+          let absolute = url.resolve(targetUrl, link);
+          return `${attr}="/proxy?url=${encodeURIComponent(absolute)}"`;
         } catch(e) { return match; }
       });
+
       res.writeHead(proxyRes.statusCode, { ...headers, 'Content-Type': 'text/html' });
       res.end(body);
     });
   });
 
   proxyReq.on('error', (e) => {
-    console.error(e);
-    res.status(500).send('Error de carga: ' + e.message);
+    // Si falla geo-fs.com, intentamos sugerir www.geo-fs.com
+    res.status(500).send(`
+      <div style="padding:20px; font-family:sans-serif;">
+        <h2>⚠️ Error de conexión</h2>
+        <p>No se pudo cargar: <b>${targetUrl}</b></p>
+        <p>Prueba escribiendo <b>www.</b> delante del dominio.</p>
+        <br>
+        <a href="/">Volver al inicio</a>
+      </div>
+    `);
   });
   proxyReq.end();
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('Proxy listo'));
+app.listen(PORT, () => console.log('Proxy Ultra-Permisivo listo'));
