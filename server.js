@@ -81,7 +81,7 @@ function rewriteCss(css, baseUrl) {
 
   return css.replace(
 
-    /url\\((.*?)\\)/gi,
+    /url\((.*?)\)/gi,
 
     (_, raw) => {
 
@@ -125,7 +125,7 @@ function rewriteJavaScript(code, baseUrl) {
 
     code = code.replace(
 
-      /fetch\\((['\"`])(.*?)\\1/g,
+      /fetch\((['"`])(.*?)\1/g,
 
       (m, q, url) => {
 
