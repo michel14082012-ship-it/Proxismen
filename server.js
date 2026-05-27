@@ -11,9 +11,6 @@ const PORT = process.env.PORT || 3000;
 const SECRET = '777';
 
 app.set('trust proxy', true);
-/* =========================================
-   MIDDLEWARES
-========================================= */
 
 app.disable('x-powered-by');
 
@@ -37,6 +34,7 @@ app.use(
 );
 
 app.use(morgan('dev'));
+
 /* =========================================
    NORMALIZE URL
 ========================================= */
@@ -72,7 +70,9 @@ function normalizeUrl(input) {
     return null;
 
   }
+
 }
+
 /* =========================================
    CSS REWRITE
 ========================================= */
@@ -80,7 +80,8 @@ function normalizeUrl(input) {
 function rewriteCss(css, baseUrl) {
 
   return css.replace(
-    /url\((.*?)\)/gi,
+
+    /url\\((.*?)\\)/gi,
 
     (_, raw) => {
 
@@ -109,9 +110,11 @@ function rewriteCss(css, baseUrl) {
       }
 
     }
+
   );
 
 }
+
 /* =========================================
    JS REWRITE
 ========================================= */
@@ -120,11 +123,9 @@ function rewriteJavaScript(code, baseUrl) {
 
   try {
 
-    // fetch()
-
     code = code.replace(
 
-      /fetch\((['"`])(.*?)\1/g,
+      /fetch\\((['\"`])(.*?)\\1/g,
 
       (m, q, url) => {
 
@@ -142,30 +143,7 @@ function rewriteJavaScript(code, baseUrl) {
         }
 
       }
-    );
 
-    // axios.get()
-
-    code = code.replace(
-
-      /axios\.get\((['"`])(.*?)\1/g,
-
-      (m, q, url) => {
-
-        try {
-
-          const absolute =
-            new URL(url, baseUrl).toString();
-
-          return `axios.get(${q}/proxy?url=${encodeURIComponent(absolute)}${q}`;
-
-        } catch {
-
-          return m;
-
-        }
-
-      }
     );
 
     return code;
@@ -177,6 +155,7 @@ function rewriteJavaScript(code, baseUrl) {
   }
 
 }
+
 /* =========================================
    HTML REWRITE
 ========================================= */
@@ -259,88 +238,200 @@ function rewriteHtml(html, baseUrl) {
   return $.html();
 
 }
+
 /* =========================================
-   HTML REWRITE
+   HOME
 ========================================= */
 
-function rewriteHtml(html, baseUrl) {
+app.get('/', (req, res) => {
 
-  const $ = cheerio.load(html);
+  if (req.query.search !== SECRET) {
 
-  $('head').prepend(`
-    <base href="${baseUrl}">
+    return res.send(`
+
+<!DOCTYPE html>
+<html>
+
+<head>
+
+<title>Wikipedia</title>
+
+<style>
+
+body{
+  margin:0;
+  height:100vh;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  background:#f5f5f5;
+  font-family:Arial;
+}
+
+.box{
+  width:350px;
+  background:white;
+  padding:40px;
+  border-radius:20px;
+  box-shadow:0 10px 40px rgba(0,0,0,.1);
+}
+
+input{
+  width:100%;
+  padding:14px;
+  border-radius:14px;
+  border:1px solid #ccc;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="box">
+
+<h2>Wikipedia</h2>
+
+<form>
+
+<input
+  name="search"
+  placeholder="Buscar..."
+>
+
+</form>
+
+</div>
+
+</body>
+</html>
+
+    `);
+
+  }
+
+  res.send(`
+
+<!DOCTYPE html>
+<html>
+
+<head>
+
+<title>Proxy Browser</title>
+
+<style>
+
+*{
+  box-sizing:border-box;
+}
+
+body,html{
+  margin:0;
+  height:100%;
+  overflow:hidden;
+  font-family:Arial;
+  background:#f1f3f4;
+}
+
+.topbar{
+  height:60px;
+  display:flex;
+  align-items:center;
+  padding:10px;
+  gap:10px;
+  background:white;
+  border-bottom:1px solid #ddd;
+}
+
+form{
+  display:flex;
+  width:100%;
+  gap:10px;
+}
+
+input{
+  flex:1;
+  padding:12px 20px;
+  border:none;
+  border-radius:999px;
+  background:#eef2f7;
+  outline:none;
+  font-size:15px;
+}
+
+button{
+  border:none;
+  border-radius:999px;
+  background:#1a73e8;
+  color:white;
+  padding:0 20px;
+  cursor:pointer;
+  font-weight:bold;
+}
+
+iframe{
+  width:100%;
+  height:calc(100% - 60px);
+  border:none;
+  background:white;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="topbar">
+
+<form
+
+onsubmit="
+
+event.preventDefault();
+
+const value =
+document.getElementById('url').value;
+
+location.href =
+'/?search=${SECRET}&url=' +
+encodeURIComponent(value);
+
+"
+
+>
+
+<input
+  id="url"
+  value="${req.query.url || ''}"
+  placeholder="https://example.com"
+  autofocus
+>
+
+<button>IR</button>
+
+</form>
+
+</div>
+
+<iframe
+
+src="${
+  req.query.url
+    ? '/proxy?url=' + encodeURIComponent(req.query.url)
+    : 'about:blank'
+}"
+
+></iframe>
+
+</body>
+</html>
+
   `);
 
-  const attrs = [
-    'href',
-    'src',
-    'action',
-    'poster'
-  ];
+});
 
-  attrs.forEach((attr) => {
-
-    $(`[${attr}]`).each((_, el) => {
-
-      const value =
-        $(el).attr(attr);
-
-      if (!value) return;
-
-      if (
-        value.startsWith('#') ||
-        value.startsWith('javascript:') ||
-        value.startsWith('data:') ||
-        value.startsWith('blob:')
-      ) {
-        return;
-      }
-
-      try {
-
-        const absolute =
-          new URL(value, baseUrl).toString();
-
-        $(el).attr(
-          attr,
-          `/proxy?url=${encodeURIComponent(absolute)}`
-        );
-
-      } catch {}
-
-    });
-
-  });
-
-  $('style').each((_, el) => {
-
-    const css = $(el).html();
-
-    if (!css) return;
-
-    $(el).html(
-      rewriteCss(css, baseUrl)
-    );
-
-  });
-
-  $('script').each((_, el) => {
-
-    const js = $(el).html();
-
-    if (!js) return;
-
-    $(el).html(
-      rewriteJavaScript(js, baseUrl)
-    );
-
-  });
-
-  $('meta[http-equiv]').remove();
-
-  return $.html();
-
-}
 /* =========================================
    PROXY
 ========================================= */
@@ -359,9 +450,6 @@ app.get('/proxy', async (req, res) => {
         .send('Invalid URL');
 
     }
-
-    const parsed =
-      new URL(target);
 
     console.log({
       target
@@ -425,8 +513,6 @@ app.get('/proxy', async (req, res) => {
       '*'
     );
 
-    // ARCHIVOS
-
     if (
       !contentType.includes('text/html')
     ) {
@@ -439,14 +525,12 @@ app.get('/proxy', async (req, res) => {
 
     }
 
-    // HTML
-
     let html =
       await response.text();
 
     html = rewriteHtml(
       html,
-      parsed.href
+      target
     );
 
     res.setHeader(
@@ -480,6 +564,7 @@ padding:40px;
   }
 
 });
+
 /* =========================================
    HEALTH
 ========================================= */
@@ -497,6 +582,7 @@ app.get('/health', (req, res) => {
   });
 
 });
+
 /* =========================================
    START
 ========================================= */
