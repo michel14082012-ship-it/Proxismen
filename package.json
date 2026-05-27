@@ -1,7 +1,39 @@
 {
-  "name": "proxy-web",
-  "version": "1.0.0",
+  "name": "proxy-web-pro",
+  "version": "3.0.0",
+  "description": "Proxy web avanzado con reescritura HTML, seguridad, compresión y soporte moderno",
   "main": "server.js",
-  "scripts": { "start": "node server.js" },
-  "dependencies": { "express": "^4.18.2" }
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "keywords": [
+    "proxy",
+    "web-proxy",
+    "express",
+    "reverse-proxy",
+    "browser-isolation"
+  ],
+  "author": "Michel",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.7.2",
+    "cheerio": "^1.0.0",
+    "compression": "^1.7.4",
+    "cookie-parser": "^1.4.6",
+    "express": "^4.19.2",
+    "helmet": "^7.1.0",
+    "http-proxy-agent": "^7.0.2",
+    "https-proxy-agent": "^7.0.5",
+    "mime-types": "^2.1.35",
+    "morgan": "^1.10.0",
+    "ws": "^8.17.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
 }
