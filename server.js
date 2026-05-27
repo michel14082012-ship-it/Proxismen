@@ -1,30 +1,16 @@
 const express = require('express');
-const axios = require('axios');
 const cheerio = require('cheerio');
 const compression = require('compression');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
-const http = require('http');
-const https = require('https');
 
 const app = express();
 
 const PORT = process.env.PORT || 3000;
 const SECRET = '777';
 
-/* =========================================
-   AGENTES KEEP-ALIVE
-========================================= */
-
-const httpAgent = new http.Agent({
-  keepAlive: true
-});
-
-const httpsAgent = new https.Agent({
-  keepAlive: true
-});
-
+app.set('trust proxy', true);
 /* =========================================
    MIDDLEWARES
 ========================================= */
@@ -33,10 +19,15 @@ app.disable('x-powered-by');
 
 app.use(compression());
 
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
-
 app.use(cookieParser());
+
+app.use(express.json({
+  limit: '10mb'
+}));
+
+app.use(express.urlencoded({
+  extended: true
+}));
 
 app.use(
   helmet({
@@ -46,16 +37,24 @@ app.use(
 );
 
 app.use(morgan('dev'));
-
 /* =========================================
-   UTILIDADES
+   NORMALIZE URL
 ========================================= */
 
 function normalizeUrl(input) {
+
+  if (!input) return null;
+
+  input = input.trim();
+
+  if (
+    !input.startsWith('http://') &&
+    !input.startsWith('https://')
+  ) {
+    input = 'https://' + input;
+  }
+
   try {
-    if (!/^https?:\/\//i.test(input)) {
-      input = 'https://' + input;
-    }
 
     const parsed = new URL(input);
 
@@ -66,16 +65,25 @@ function normalizeUrl(input) {
       return null;
     }
 
-    return parsed.toString();
+    return parsed.href;
+
   } catch {
+
     return null;
+
   }
 }
+/* =========================================
+   CSS REWRITE
+========================================= */
 
 function rewriteCss(css, baseUrl) {
+
   return css.replace(
     /url\((.*?)\)/gi,
+
     (_, raw) => {
+
       let clean = raw
         .replace(/['"]/g, '')
         .trim();
@@ -88,20 +96,93 @@ function rewriteCss(css, baseUrl) {
       }
 
       try {
+
         const absolute =
           new URL(clean, baseUrl).toString();
 
-        return `url("/proxy?url=${encodeURIComponent(
-          absolute
-        )}")`;
+        return `url("/proxy?url=${encodeURIComponent(absolute)}")`;
+
       } catch {
+
         return `url(${clean})`;
+
       }
+
     }
   );
+
 }
+/* =========================================
+   JS REWRITE
+========================================= */
+
+function rewriteJavaScript(code, baseUrl) {
+
+  try {
+
+    // fetch()
+
+    code = code.replace(
+
+      /fetch\((['"`])(.*?)\1/g,
+
+      (m, q, url) => {
+
+        try {
+
+          const absolute =
+            new URL(url, baseUrl).toString();
+
+          return `fetch(${q}/proxy?url=${encodeURIComponent(absolute)}${q}`;
+
+        } catch {
+
+          return m;
+
+        }
+
+      }
+    );
+
+    // axios.get()
+
+    code = code.replace(
+
+      /axios\.get\((['"`])(.*?)\1/g,
+
+      (m, q, url) => {
+
+        try {
+
+          const absolute =
+            new URL(url, baseUrl).toString();
+
+          return `axios.get(${q}/proxy?url=${encodeURIComponent(absolute)}${q}`;
+
+        } catch {
+
+          return m;
+
+        }
+
+      }
+    );
+
+    return code;
+
+  } catch {
+
+    return code;
+
+  }
+
+}
+/* =========================================
+   HTML REWRITE
+========================================= */
 
 function rewriteHtml(html, baseUrl) {
+
   const $ = cheerio.load(html);
 
   $('head').prepend(`
@@ -116,35 +197,41 @@ function rewriteHtml(html, baseUrl) {
   ];
 
   attrs.forEach((attr) => {
-    $(`[${attr}]`).each((_, el) => {
-      const val = $(el).attr(attr);
 
-      if (!val) return;
+    $(`[${attr}]`).each((_, el) => {
+
+      const value =
+        $(el).attr(attr);
+
+      if (!value) return;
 
       if (
-        val.startsWith('#') ||
-        val.startsWith('javascript:') ||
-        val.startsWith('data:') ||
-        val.startsWith('blob:')
+        value.startsWith('#') ||
+        value.startsWith('javascript:') ||
+        value.startsWith('data:') ||
+        value.startsWith('blob:')
       ) {
         return;
       }
 
       try {
+
         const absolute =
-          new URL(val, baseUrl).toString();
+          new URL(value, baseUrl).toString();
 
         $(el).attr(
           attr,
-          `/proxy?url=${encodeURIComponent(
-            absolute
-          )}`
+          `/proxy?url=${encodeURIComponent(absolute)}`
         );
+
       } catch {}
+
     });
+
   });
 
   $('style').each((_, el) => {
+
     const css = $(el).html();
 
     if (!css) return;
@@ -152,295 +239,215 @@ function rewriteHtml(html, baseUrl) {
     $(el).html(
       rewriteCss(css, baseUrl)
     );
+
   });
 
   $('script').each((_, el) => {
-    const code = $(el).html();
 
-    if (!code) return;
+    const js = $(el).html();
 
-    let modified = code;
+    if (!js) return;
 
-    modified = modified.replace(
-      /fetch\((['"`])(.*?)\1/g,
-      (m, q, link) => {
-        try {
-          const absolute =
-            new URL(link, baseUrl).toString();
-
-          return `fetch(${q}/proxy?url=${encodeURIComponent(
-            absolute
-          )}${q}`;
-        } catch {
-          return m;
-        }
-      }
+    $(el).html(
+      rewriteJavaScript(js, baseUrl)
     );
 
-    $(el).html(modified);
   });
 
   $('meta[http-equiv]').remove();
 
   return $.html();
-}
 
+}
 /* =========================================
-   HOME
+   HTML REWRITE
 ========================================= */
 
-app.get('/', (req, res) => {
-  const access = req.query.search;
+function rewriteHtml(html, baseUrl) {
 
-  if (access !== SECRET) {
-    return res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Wikipedia</title>
+  const $ = cheerio.load(html);
 
-        <style>
-          body{
-            margin:0;
-            display:flex;
-            justify-content:center;
-            align-items:center;
-            height:100vh;
-            font-family:Arial;
-            background:#f5f5f5;
-          }
-
-          .box{
-            background:white;
-            padding:40px;
-            border-radius:20px;
-            box-shadow:0 10px 40px rgba(0,0,0,.1);
-            width:350px;
-          }
-
-          input{
-            width:100%;
-            padding:14px;
-            border-radius:12px;
-            border:1px solid #ccc;
-          }
-        </style>
-      </head>
-
-      <body>
-        <div class="box">
-          <h2>Wikipedia</h2>
-
-          <form method="GET">
-            <input
-              type="text"
-              name="search"
-              placeholder="Buscar..."
-            />
-          </form>
-        </div>
-      </body>
-      </html>
-    `);
-  }
-
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>Proxy Browser</title>
-
-      <style>
-        *{
-          box-sizing:border-box;
-        }
-
-        body,html{
-          margin:0;
-          height:100%;
-          overflow:hidden;
-          background:#f1f3f4;
-          font-family:Arial;
-        }
-
-        .toolbar{
-          height:60px;
-          display:flex;
-          align-items:center;
-          gap:10px;
-          padding:10px;
-          background:white;
-          border-bottom:1px solid #ddd;
-        }
-
-        form{
-          display:flex;
-          width:100%;
-          gap:10px;
-        }
-
-        input{
-          flex:1;
-          padding:12px 20px;
-          border:none;
-          border-radius:999px;
-          background:#eef2f7;
-          outline:none;
-          font-size:15px;
-        }
-
-        button{
-          border:none;
-          padding:0 20px;
-          border-radius:999px;
-          background:#1a73e8;
-          color:white;
-          font-weight:bold;
-          cursor:pointer;
-        }
-
-        iframe{
-          width:100%;
-          height:calc(100% - 60px);
-          border:none;
-          background:white;
-        }
-      </style>
-    </head>
-
-    <body>
-
-      <div class="toolbar">
-
-        <form
-          onsubmit="
-            event.preventDefault();
-
-            const value =
-              document.getElementById('url').value;
-
-            location.href =
-              '/?search=${SECRET}&url=' +
-              encodeURIComponent(value);
-          "
-        >
-
-          <input
-            id="url"
-            value="${req.query.url || ''}"
-            placeholder="https://example.com"
-            autofocus
-          />
-
-          <button>IR</button>
-
-        </form>
-
-      </div>
-
-      <iframe
-        src="${
-          req.query.url
-            ? `/proxy?url=${encodeURIComponent(
-                req.query.url
-              )}`
-            : 'about:blank'
-        }"
-        allow="
-          fullscreen;
-          autoplay;
-          clipboard-write;
-          microphone;
-          camera;
-          geolocation
-        "
-      ></iframe>
-
-    </body>
-    </html>
+  $('head').prepend(`
+    <base href="${baseUrl}">
   `);
-});
 
+  const attrs = [
+    'href',
+    'src',
+    'action',
+    'poster'
+  ];
+
+  attrs.forEach((attr) => {
+
+    $(`[${attr}]`).each((_, el) => {
+
+      const value =
+        $(el).attr(attr);
+
+      if (!value) return;
+
+      if (
+        value.startsWith('#') ||
+        value.startsWith('javascript:') ||
+        value.startsWith('data:') ||
+        value.startsWith('blob:')
+      ) {
+        return;
+      }
+
+      try {
+
+        const absolute =
+          new URL(value, baseUrl).toString();
+
+        $(el).attr(
+          attr,
+          `/proxy?url=${encodeURIComponent(absolute)}`
+        );
+
+      } catch {}
+
+    });
+
+  });
+
+  $('style').each((_, el) => {
+
+    const css = $(el).html();
+
+    if (!css) return;
+
+    $(el).html(
+      rewriteCss(css, baseUrl)
+    );
+
+  });
+
+  $('script').each((_, el) => {
+
+    const js = $(el).html();
+
+    if (!js) return;
+
+    $(el).html(
+      rewriteJavaScript(js, baseUrl)
+    );
+
+  });
+
+  $('meta[http-equiv]').remove();
+
+  return $.html();
+
+}
 /* =========================================
    PROXY
 ========================================= */
 
 app.get('/proxy', async (req, res) => {
+
   try {
+
     const target =
       normalizeUrl(req.query.url);
 
     if (!target) {
+
       return res
         .status(400)
-        .send('URL inválida');
+        .send('Invalid URL');
+
     }
 
-    const response = await axios({
-      url: target,
-      method: req.method,
-      responseType: 'arraybuffer',
-      timeout: 20000,
-      maxRedirects: 5,
-      decompress: true,
+    const parsed =
+      new URL(target);
 
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 Chrome/124 Safari/537.36',
-
-        'Accept-Language':
-          'es-ES,es;q=0.9',
-
-        'Accept':
-          '*/*',
-
-        'Referer':
-          new URL(target).origin,
-
-        'Origin':
-          new URL(target).origin
-      },
-
-      httpAgent,
-      httpsAgent
+    console.log({
+      target
     });
 
-    const headers = {
-      ...response.headers
-    };
+    const response =
+      await fetch(target, {
 
-    delete headers['content-security-policy'];
-    delete headers['x-frame-options'];
-    delete headers['content-length'];
-    delete headers['strict-transport-security'];
+        method: 'GET',
 
-    headers['Access-Control-Allow-Origin'] = '*';
-    headers['Access-Control-Allow-Credentials'] =
-      'true';
+        redirect: 'follow',
+
+        headers: {
+
+          'User-Agent':
+            'Mozilla/5.0 Chrome/124 Safari/537.36',
+
+          'Accept':
+            '*/*',
+
+          'Accept-Language':
+            'es-ES,es;q=0.9'
+
+        }
+
+      });
 
     const contentType =
-      headers['content-type'] || '';
+      response.headers.get('content-type') || '';
 
-    res.status(response.status);
+    response.headers.forEach((value, key) => {
 
-    Object.entries(headers).forEach(
-      ([k, v]) => {
+      const blocked = [
+
+        'content-security-policy',
+
+        'content-security-policy-report-only',
+
+        'x-frame-options',
+
+        'strict-transport-security',
+
+        'content-length'
+
+      ];
+
+      if (!blocked.includes(key.toLowerCase())) {
+
         try {
-          res.setHeader(k, v);
+
+          res.setHeader(key, value);
+
         } catch {}
+
       }
+
+    });
+
+    res.setHeader(
+      'Access-Control-Allow-Origin',
+      '*'
     );
+
+    // ARCHIVOS
 
     if (
       !contentType.includes('text/html')
     ) {
-      return res.send(response.data);
+
+      const buffer = Buffer.from(
+        await response.arrayBuffer()
+      );
+
+      return res.send(buffer);
+
     }
 
-    let html =
-      response.data.toString('utf8');
+    // HTML
 
-    html = rewriteHtml(html, target);
+    let html =
+      await response.text();
+
+    html = rewriteHtml(
+      html,
+      parsed.href
+    );
 
     res.setHeader(
       'Content-Type',
@@ -450,59 +457,62 @@ app.get('/proxy', async (req, res) => {
     res.send(html);
 
   } catch (err) {
-    console.error(err.message);
+
+    console.error(err);
 
     res.status(500).send(`
-      <!DOCTYPE html>
-      <html>
-      <body style="
-        font-family:Arial;
-        background:#111;
-        color:white;
-        padding:40px;
-      ">
-        <h1>Error Proxy</h1>
-        <p>${err.message}</p>
-      </body>
-      </html>
-    `);
-  }
-});
 
+<body style="
+background:#111;
+color:white;
+font-family:Arial;
+padding:40px;
+">
+
+<h1>Proxy Error</h1>
+
+<pre>${err.message}</pre>
+
+</body>
+
+    `);
+
+  }
+
+});
 /* =========================================
    HEALTH
 ========================================= */
 
 app.get('/health', (req, res) => {
+
   res.json({
+
     ok: true,
+
     uptime: process.uptime(),
-    memory: process.memoryUsage(),
+
     node: process.version
+
   });
+
 });
-
-/* =========================================
-   404
-========================================= */
-
-app.use((req, res) => {
-  res.status(404).send('404');
-});
-
 /* =========================================
    START
 ========================================= */
 
 app.listen(PORT, () => {
+
   console.log(`
-====================================
- PROXY WEB PRO
-====================================
-
-Running:
-http://localhost:${PORT}
 
 ====================================
+
+ PROXY ULTRA STYLE
+
+ PORT ${PORT}
+
+====================================
+
   `);
+
 });
