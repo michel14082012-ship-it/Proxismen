@@ -3,27 +3,53 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const compression = require('compression');
 const helmet = require('helmet');
+const morgan = require('morgan');
+const cookieParser = require('cookie-parser');
+const http = require('http');
+const https = require('https');
 
 const app = express();
 
 const PORT = process.env.PORT || 3000;
-const CLAVE_SECRETA = '777';
+const SECRET = '777';
 
-/* =========================
+/* =========================================
+   AGENTES KEEP-ALIVE
+========================================= */
+
+const httpAgent = new http.Agent({
+  keepAlive: true
+});
+
+const httpsAgent = new https.Agent({
+  keepAlive: true
+});
+
+/* =========================================
    MIDDLEWARES
-========================= */
+========================================= */
+
+app.disable('x-powered-by');
 
 app.use(compression());
 
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+
+app.use(cookieParser());
+
 app.use(
   helmet({
-    contentSecurityPolicy: false
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false
   })
 );
 
-/* =========================
+app.use(morgan('dev'));
+
+/* =========================================
    UTILIDADES
-========================= */
+========================================= */
 
 function normalizeUrl(input) {
   try {
@@ -33,8 +59,10 @@ function normalizeUrl(input) {
 
     const parsed = new URL(input);
 
-    // Bloquea protocolos peligrosos
-    if (!['http:', 'https:'].includes(parsed.protocol)) {
+    if (
+      parsed.protocol !== 'http:' &&
+      parsed.protocol !== 'https:'
+    ) {
       return null;
     }
 
@@ -44,91 +72,166 @@ function normalizeUrl(input) {
   }
 }
 
+function rewriteCss(css, baseUrl) {
+  return css.replace(
+    /url\((.*?)\)/gi,
+    (_, raw) => {
+      let clean = raw
+        .replace(/['"]/g, '')
+        .trim();
+
+      if (
+        clean.startsWith('data:') ||
+        clean.startsWith('blob:')
+      ) {
+        return `url(${clean})`;
+      }
+
+      try {
+        const absolute =
+          new URL(clean, baseUrl).toString();
+
+        return `url("/proxy?url=${encodeURIComponent(
+          absolute
+        )}")`;
+      } catch {
+        return `url(${clean})`;
+      }
+    }
+  );
+}
+
 function rewriteHtml(html, baseUrl) {
   const $ = cheerio.load(html);
 
-  $('head').prepend(`<base href="${baseUrl}">`);
+  $('head').prepend(`
+    <base href="${baseUrl}">
+  `);
 
-  const attrs = ['href', 'src', 'action'];
+  const attrs = [
+    'href',
+    'src',
+    'action',
+    'poster'
+  ];
 
   attrs.forEach((attr) => {
     $(`[${attr}]`).each((_, el) => {
-      const value = $(el).attr(attr);
+      const val = $(el).attr(attr);
 
-      if (!value) return;
+      if (!val) return;
 
       if (
-        value.startsWith('#') ||
-        value.startsWith('javascript:') ||
-        value.startsWith('data:')
+        val.startsWith('#') ||
+        val.startsWith('javascript:') ||
+        val.startsWith('data:') ||
+        val.startsWith('blob:')
       ) {
         return;
       }
 
       try {
-        const absolute = new URL(value, baseUrl).toString();
+        const absolute =
+          new URL(val, baseUrl).toString();
 
         $(el).attr(
           attr,
-          `/proxy?url=${encodeURIComponent(absolute)}`
+          `/proxy?url=${encodeURIComponent(
+            absolute
+          )}`
         );
       } catch {}
     });
   });
 
-  // Elimina políticas anti-frame
-  $('meta[http-equiv="Content-Security-Policy"]').remove();
-  $('meta[http-equiv="X-Frame-Options"]').remove();
+  $('style').each((_, el) => {
+    const css = $(el).html();
+
+    if (!css) return;
+
+    $(el).html(
+      rewriteCss(css, baseUrl)
+    );
+  });
+
+  $('script').each((_, el) => {
+    const code = $(el).html();
+
+    if (!code) return;
+
+    let modified = code;
+
+    modified = modified.replace(
+      /fetch\((['"`])(.*?)\1/g,
+      (m, q, link) => {
+        try {
+          const absolute =
+            new URL(link, baseUrl).toString();
+
+          return `fetch(${q}/proxy?url=${encodeURIComponent(
+            absolute
+          )}${q}`;
+        } catch {
+          return m;
+        }
+      }
+    );
+
+    $(el).html(modified);
+  });
+
+  $('meta[http-equiv]').remove();
 
   return $.html();
 }
 
-/* =========================
-   INTERFAZ
-========================= */
+/* =========================================
+   HOME
+========================================= */
 
 app.get('/', (req, res) => {
-  const query = req.query.search;
+  const access = req.query.search;
 
-  if (query !== CLAVE_SECRETA) {
+  if (access !== SECRET) {
     return res.send(`
       <!DOCTYPE html>
       <html>
       <head>
         <title>Wikipedia</title>
+
         <style>
           body{
-            font-family:Arial;
-            background:#f5f5f5;
+            margin:0;
             display:flex;
             justify-content:center;
             align-items:center;
             height:100vh;
-            margin:0;
+            font-family:Arial;
+            background:#f5f5f5;
           }
 
           .box{
             background:white;
             padding:40px;
-            border-radius:16px;
-            box-shadow:0 10px 30px rgba(0,0,0,.1);
+            border-radius:20px;
+            box-shadow:0 10px 40px rgba(0,0,0,.1);
             width:350px;
           }
 
           input{
             width:100%;
-            padding:12px;
+            padding:14px;
+            border-radius:12px;
             border:1px solid #ccc;
-            border-radius:10px;
-            font-size:16px;
           }
         </style>
       </head>
+
       <body>
         <div class="box">
           <h2>Wikipedia</h2>
 
-          <form>
+          <form method="GET">
             <input
               type="text"
               name="search"
@@ -145,7 +248,7 @@ app.get('/', (req, res) => {
     <!DOCTYPE html>
     <html>
     <head>
-      <title>Navegador Proxy</title>
+      <title>Proxy Browser</title>
 
       <style>
         *{
@@ -156,11 +259,11 @@ app.get('/', (req, res) => {
           margin:0;
           height:100%;
           overflow:hidden;
-          font-family:Arial;
           background:#f1f3f4;
+          font-family:Arial;
         }
 
-        .topbar{
+        .toolbar{
           height:60px;
           display:flex;
           align-items:center;
@@ -178,18 +281,18 @@ app.get('/', (req, res) => {
 
         input{
           flex:1;
-          padding:12px 18px;
-          border-radius:30px;
+          padding:12px 20px;
           border:none;
+          border-radius:999px;
           background:#eef2f7;
-          font-size:15px;
           outline:none;
+          font-size:15px;
         }
 
         button{
-          padding:0 20px;
           border:none;
-          border-radius:30px;
+          padding:0 20px;
+          border-radius:999px;
           background:#1a73e8;
           color:white;
           font-weight:bold;
@@ -207,37 +310,50 @@ app.get('/', (req, res) => {
 
     <body>
 
-      <div class="topbar">
+      <div class="toolbar">
+
         <form
           onsubmit="
             event.preventDefault();
 
-            const url =
+            const value =
               document.getElementById('url').value;
 
             location.href =
-              '?search=${CLAVE_SECRETA}&url=' +
-              encodeURIComponent(url);
+              '/?search=${SECRET}&url=' +
+              encodeURIComponent(value);
           "
         >
+
           <input
             id="url"
-            placeholder="https://example.com"
             value="${req.query.url || ''}"
+            placeholder="https://example.com"
             autofocus
           />
 
           <button>IR</button>
+
         </form>
+
       </div>
 
       <iframe
         src="${
           req.query.url
-            ? `/proxy?url=${encodeURIComponent(req.query.url)}`
+            ? `/proxy?url=${encodeURIComponent(
+                req.query.url
+              )}`
             : 'about:blank'
         }"
-        allowfullscreen
+        allow="
+          fullscreen;
+          autoplay;
+          clipboard-write;
+          microphone;
+          camera;
+          geolocation
+        "
       ></iframe>
 
     </body>
@@ -245,73 +361,148 @@ app.get('/', (req, res) => {
   `);
 });
 
-/* =========================
+/* =========================================
    PROXY
-========================= */
+========================================= */
 
 app.get('/proxy', async (req, res) => {
   try {
-    const target = normalizeUrl(req.query.url);
+    const target =
+      normalizeUrl(req.query.url);
 
     if (!target) {
-      return res.status(400).send('URL inválida');
+      return res
+        .status(400)
+        .send('URL inválida');
     }
 
     const response = await axios({
       url: target,
-      method: 'GET',
+      method: req.method,
       responseType: 'arraybuffer',
-      timeout: 15000,
+      timeout: 20000,
       maxRedirects: 5,
+      decompress: true,
+
       headers: {
         'User-Agent':
           'Mozilla/5.0 Chrome/124 Safari/537.36',
+
         'Accept-Language':
-          'es-ES,es;q=0.9'
-      }
+          'es-ES,es;q=0.9',
+
+        'Accept':
+          '*/*',
+
+        'Referer':
+          new URL(target).origin,
+
+        'Origin':
+          new URL(target).origin
+      },
+
+      httpAgent,
+      httpsAgent
     });
+
+    const headers = {
+      ...response.headers
+    };
+
+    delete headers['content-security-policy'];
+    delete headers['x-frame-options'];
+    delete headers['content-length'];
+    delete headers['strict-transport-security'];
+
+    headers['Access-Control-Allow-Origin'] = '*';
+    headers['Access-Control-Allow-Credentials'] =
+      'true';
 
     const contentType =
-      response.headers['content-type'] || '';
+      headers['content-type'] || '';
 
-    // Headers seguros
-    res.removeHeader('X-Frame-Options');
+    res.status(response.status);
 
-    res.set({
-      'Access-Control-Allow-Origin': '*',
-      'Cache-Control': 'no-store'
-    });
+    Object.entries(headers).forEach(
+      ([k, v]) => {
+        try {
+          res.setHeader(k, v);
+        } catch {}
+      }
+    );
 
-    // Recursos binarios
-    if (!contentType.includes('text/html')) {
-      res.set('Content-Type', contentType);
-
+    if (
+      !contentType.includes('text/html')
+    ) {
       return res.send(response.data);
     }
 
-    let html = response.data.toString('utf-8');
+    let html =
+      response.data.toString('utf8');
 
     html = rewriteHtml(html, target);
 
-    res.set('Content-Type', 'text/html; charset=UTF-8');
+    res.setHeader(
+      'Content-Type',
+      'text/html; charset=UTF-8'
+    );
 
     res.send(html);
+
   } catch (err) {
     console.error(err.message);
 
     res.status(500).send(`
-      <h1>Error</h1>
-      <p>No se pudo cargar el sitio.</p>
+      <!DOCTYPE html>
+      <html>
+      <body style="
+        font-family:Arial;
+        background:#111;
+        color:white;
+        padding:40px;
+      ">
+        <h1>Error Proxy</h1>
+        <p>${err.message}</p>
+      </body>
+      </html>
     `);
   }
 });
 
-/* =========================
+/* =========================================
+   HEALTH
+========================================= */
+
+app.get('/health', (req, res) => {
+  res.json({
+    ok: true,
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    node: process.version
+  });
+});
+
+/* =========================================
+   404
+========================================= */
+
+app.use((req, res) => {
+  res.status(404).send('404');
+});
+
+/* =========================================
    START
-========================= */
+========================================= */
 
 app.listen(PORT, () => {
-  console.log(
-    'Servidor iniciado en puerto ' + PORT
-  );
+  console.log(`
+====================================
+ PROXY WEB PRO
+====================================
+
+Running:
+http://localhost:${PORT}
+
+====================================
+  `);
 });
